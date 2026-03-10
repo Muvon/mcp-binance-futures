@@ -403,11 +403,24 @@ async def place_order(
     """Place a new futures order.
 
     Common patterns:
-    - Market buy:  side=BUY, type=MARKET, quantity=0.01
-    - Limit sell:  side=SELL, type=LIMIT, quantity=0.01, price=50000, time_in_force=GTC
-    - Stop loss:   side=SELL, type=STOP_MARKET, stop_price=45000, close_position=True
-    - Take profit: side=SELL, type=TAKE_PROFIT_MARKET, stop_price=60000, close_position=True
+    - Market buy:   side=BUY,  type=MARKET,            quantity=0.01
+    - Limit sell:   side=SELL, type=LIMIT,             quantity=0.01, price=50000, time_in_force=GTC
+    - Stop loss:    side=SELL, type=STOP_MARKET,       stop_price=45000, close_position=True
+    - Take profit:  side=SELL, type=TAKE_PROFIT_MARKET, stop_price=60000, close_position=True
+
+    Note: STOP_MARKET, TAKE_PROFIT_MARKET, STOP, TAKE_PROFIT, TRAILING_STOP_MARKET are
+    automatically routed to the Binance Algo Order API (/fapi/v1/algoOrder) as required
+    since the 2025-12-09 Binance migration.
     """
+    # Conditional order types must use the Algo API since 2025-12-09
+    _ALGO_ORDER_TYPES = {
+        "STOP_MARKET",
+        "TAKE_PROFIT_MARKET",
+        "STOP",
+        "TAKE_PROFIT",
+        "TRAILING_STOP_MARKET",
+    }
+
     if close_position and order_type not in ("STOP_MARKET", "TAKE_PROFIT_MARKET"):
         raise ValueError(
             f"close_position=True is only valid with STOP_MARKET or TAKE_PROFIT_MARKET, "
@@ -421,6 +434,30 @@ async def place_order(
         raise ValueError(
             f"callback_rate is only valid for TRAILING_STOP_MARKET, got order_type={order_type!r}"
         )
+
+    if order_type in _ALGO_ORDER_TYPES:
+        # Algo API uses `triggerPrice` instead of `stopPrice`, and requires `algoType`
+        params = _strip_none(
+            {
+                "algoType": "CONDITIONAL",
+                "symbol": symbol,
+                "side": side,
+                "type": order_type,
+                "quantity": quantity,
+                "price": price,
+                "triggerPrice": stop_price,
+                "timeInForce": time_in_force,
+                "reduceOnly": str(reduce_only).lower() if reduce_only is not None else None,
+                "closePosition": str(close_position).lower()
+                if close_position is not None
+                else None,
+                "positionSide": position_side,
+                "clientAlgoId": client_order_id,
+                "callbackRate": callback_rate,
+            }
+        )
+        return _format_algo_order(await _client(ctx).post_signed("/fapi/v1/algoOrder", params))
+
     params = _strip_none(
         {
             "symbol": symbol,
@@ -638,6 +675,28 @@ def _format_order(o: dict) -> dict:
         "executedQty": o.get("executedQty"),
         "avgPrice": o.get("avgPrice"),
         "stopPrice": o.get("stopPrice"),
+        "timeInForce": o.get("timeInForce"),
+        "reduceOnly": o.get("reduceOnly"),
+        "closePosition": o.get("closePosition"),
+        "updateTime": o.get("updateTime"),
+    }
+
+
+def _format_algo_order(o: dict) -> dict:
+    """Normalize an algo order response (algoId-based) to the same shape as _format_order."""
+    return {
+        "orderId": o.get("algoId"),
+        "clientOrderId": o.get("clientAlgoId"),
+        "symbol": o.get("symbol"),
+        "status": o.get("algoStatus"),
+        "type": o.get("orderType"),
+        "side": o.get("side"),
+        "positionSide": o.get("positionSide"),
+        "price": o.get("price"),
+        "origQty": o.get("quantity"),
+        "executedQty": None,
+        "avgPrice": None,
+        "stopPrice": o.get("triggerPrice"),
         "timeInForce": o.get("timeInForce"),
         "reduceOnly": o.get("reduceOnly"),
         "closePosition": o.get("closePosition"),
