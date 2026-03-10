@@ -379,11 +379,10 @@ async def place_order(
     close_position: Annotated[
         bool | None,
         Field(
-            description=(
-                "If True, closes the entire position at trigger. "
-                "ONLY valid with order_type STOP_MARKET or TAKE_PROFIT_MARKET. "
-                "Cannot be used with MARKET, LIMIT, or other types."
-            )
+            "If True, closes the entire position at trigger (Close-All). "
+            "ONLY valid with STOP_MARKET or TAKE_PROFIT_MARKET. "
+            "Binance allows at most 1 SL and 1 TP with close_position=True per direction — "
+            "cancel the existing one first if you need to replace it."
         ),
     ] = None,
     position_side: Annotated[
@@ -403,14 +402,17 @@ async def place_order(
     """Place a new futures order.
 
     Common patterns:
-    - Market buy:   side=BUY,  type=MARKET,            quantity=0.01
-    - Limit sell:   side=SELL, type=LIMIT,             quantity=0.01, price=50000, time_in_force=GTC
-    - Stop loss:    side=SELL, type=STOP_MARKET,       stop_price=45000, close_position=True
+    - Market buy:   side=BUY,  type=MARKET,             quantity=0.01
+    - Limit sell:   side=SELL, type=LIMIT,              quantity=0.01, price=50000, time_in_force=GTC
+    - Stop loss:    side=SELL, type=STOP_MARKET,        stop_price=45000, close_position=True
     - Take profit:  side=SELL, type=TAKE_PROFIT_MARKET, stop_price=60000, close_position=True
 
     Note: STOP_MARKET, TAKE_PROFIT_MARKET, STOP, TAKE_PROFIT, TRAILING_STOP_MARKET are
     automatically routed to the Binance Algo Order API (/fapi/v1/algoOrder) as required
     since the 2025-12-09 Binance migration.
+
+    Note: With close_position=True, Binance only allows 1 SL and 1 TP per direction
+    (closes entire position). Cancel the existing order first if you need to replace it.
     """
     # Conditional order types must use the Algo API since 2025-12-09
     _ALGO_ORDER_TYPES = {
