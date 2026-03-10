@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Any, Literal, cast
 
 from fastmcp import Context, FastMCP
+from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
 from pydantic import Field
 
 from client import BinanceClient, BinanceError
@@ -39,6 +40,9 @@ mcp = FastMCP(
     ),
     lifespan=lifespan,
 )
+
+# Add error handling middleware to catch all exceptions and convert to MCP errors
+mcp.add_middleware(ErrorHandlingMiddleware(include_traceback=False))
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
