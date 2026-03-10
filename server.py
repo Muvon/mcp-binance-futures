@@ -10,7 +10,7 @@ Environment variables required:
 """
 
 from contextlib import asynccontextmanager
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from fastmcp import Context, FastMCP
 from pydantic import Field
@@ -21,7 +21,7 @@ from client import BinanceClient, BinanceError
 
 
 @asynccontextmanager
-async def lifespan(server: FastMCP):
+async def lifespan(server: FastMCP) -> Any:
     client = BinanceClient.from_env()
     try:
         yield {"client": client}
@@ -45,7 +45,9 @@ mcp = FastMCP(
 
 
 def _client(ctx: Context) -> BinanceClient:
-    return ctx.request_context.lifespan_context["client"]
+    """Extract BinanceClient from lifespan context."""
+    assert ctx.request_context is not None
+    return cast(BinanceClient, ctx.request_context.lifespan_context["client"])
 
 
 def _strip_none(d: dict[str, Any]) -> dict[str, Any]:
@@ -59,9 +61,9 @@ def _strip_none(d: dict[str, Any]) -> dict[str, Any]:
 
 
 @mcp.tool
-async def ping(ctx: Context) -> dict:
+async def ping(ctx: Context) -> dict[str, Any]:
     """Test connectivity to the Binance Futures API. Returns {} on success."""
-    return await _client(ctx).get("/fapi/v1/ping")
+    return cast(dict[str, Any], await _client(ctx).get("/fapi/v1/ping"))
 
 
 @mcp.tool
@@ -101,12 +103,14 @@ async def get_order_book(
     ctx: Context,
     symbol: Annotated[str, Field(description="Trading pair, e.g. 'BTCUSDT'")],
     limit: Annotated[int, Field(description="Depth levels: 5, 10, 20, 50, 100", ge=5, le=100)] = 20,
-) -> dict:
+) -> dict[str, Any]:
     """Get order book bids and asks for a symbol.
 
     Returns top `limit` bids and asks as [[price, qty], ...] lists.
     """
-    return await _client(ctx).get("/fapi/v1/depth", {"symbol": symbol, "limit": limit})
+    return cast(
+        dict[str, Any], await _client(ctx).get("/fapi/v1/depth", {"symbol": symbol, "limit": limit})
+    )
 
 
 @mcp.tool
@@ -114,9 +118,12 @@ async def get_recent_trades(
     ctx: Context,
     symbol: Annotated[str, Field(description="Trading pair, e.g. 'BTCUSDT'")],
     limit: Annotated[int, Field(description="Number of trades (max 1000)", ge=1, le=1000)] = 50,
-) -> list:
+) -> list[dict[str, Any]]:
     """Get the most recent public trades for a symbol."""
-    return await _client(ctx).get("/fapi/v1/trades", {"symbol": symbol, "limit": limit})
+    return cast(
+        list[dict[str, Any]],
+        await _client(ctx).get("/fapi/v1/trades", {"symbol": symbol, "limit": limit}),
+    )
 
 
 @mcp.tool

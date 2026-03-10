@@ -23,9 +23,9 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --all-extras
 
-      - name: Run Ruff (lint + format check)
+      - name: Run Ruff (lint)
         run: uv run ruff check --output-format=github .
 
       - name: Run Ruff format check
@@ -47,7 +47,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --all-extras
 
       - name: Run tests
         run: uv run pytest -v
@@ -68,7 +68,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --all-extras
 
       - name: Run mypy
-        run: uv run mypy --ignore-missing-imports .
+        run: uv run mypy .

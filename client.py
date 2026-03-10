@@ -8,7 +8,7 @@ import hashlib
 import hmac
 import os
 import time
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlencode
 
 import httpx
@@ -98,30 +98,36 @@ class BinanceClient:
 
     # ── HTTP helpers ──────────────────────────────────────────────────────────
 
-    async def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+    async def get(
+        self, path: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any] | list[Any]:
         """Public GET — no signing."""
         r = await self._http.get(path, params=params or {})
-        return self._raise_for_error(r)
+        return cast("dict[str, Any] | list[Any]", self._raise_for_error(r))
 
-    async def get_signed(self, path: str, params: dict[str, Any] | None = None) -> Any:
+    async def get_signed(
+        self, path: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any] | list[Any]:
         """Signed GET (USER_DATA)."""
         r = await self._http.get(path, params=self._sign(params or {}))
-        return self._raise_for_error(r)
+        return cast("dict[str, Any] | list[Any]", self._raise_for_error(r))
 
-    async def post_signed(self, path: str, params: dict[str, Any] | None = None) -> Any:
+    async def post_signed(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Signed POST (TRADE / USER_DATA)."""
         signed = self._sign(params or {})
         r = await self._http.post(path, data=signed)
-        return self._raise_for_error(r)
+        return cast(dict[str, Any], self._raise_for_error(r))
 
-    async def put_signed(self, path: str, params: dict[str, Any] | None = None) -> Any:
+    async def put_signed(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Signed PUT (order modification)."""
         signed = self._sign(params or {})
         r = await self._http.put(path, data=signed)
-        return self._raise_for_error(r)
+        return cast(dict[str, Any], self._raise_for_error(r))
 
-    async def delete_signed(self, path: str, params: dict[str, Any] | None = None) -> Any:
+    async def delete_signed(
+        self, path: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Signed DELETE (cancel orders)."""
         signed = self._sign(params or {})
         r = await self._http.request("DELETE", path, data=signed)
-        return self._raise_for_error(r)
+        return cast(dict[str, Any], self._raise_for_error(r))
