@@ -12,12 +12,13 @@ Environment variables required:
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, Literal
 
-from fastmcp import FastMCP, Context
+from fastmcp import Context, FastMCP
 from pydantic import Field
 
 from client import BinanceClient, BinanceError
 
 # ── Lifespan: one shared client for the server's lifetime ─────────────────────
+
 
 @asynccontextmanager
 async def lifespan(server: FastMCP):
@@ -42,6 +43,7 @@ mcp = FastMCP(
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _client(ctx: Context) -> BinanceClient:
     return ctx.request_context.lifespan_context["client"]
 
@@ -54,6 +56,7 @@ def _strip_none(d: dict[str, Any]) -> dict[str, Any]:
 # ═════════════════════════════════════════════════════════════════════════════
 # MARKET DATA  (public — no auth)
 # ═════════════════════════════════════════════════════════════════════════════
+
 
 @mcp.tool
 async def ping(ctx: Context) -> dict:
@@ -121,7 +124,9 @@ async def get_klines(
     ctx: Context,
     symbol: Annotated[str, Field(description="Trading pair, e.g. 'BTCUSDT'")],
     interval: Annotated[
-        Literal["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w"],
+        Literal[
+            "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w"
+        ],
         Field(description="Candlestick interval"),
     ] = "1h",
     limit: Annotated[int, Field(description="Number of candles (max 1500)", ge=1, le=1500)] = 100,
@@ -131,12 +136,29 @@ async def get_klines(
     Returns list of dicts with: openTime, open, high, low, close, volume,
     closeTime, quoteVolume, trades, takerBuyVolume, takerBuyQuoteVolume.
     """
-    raw = await _client(ctx).get("/fapi/v1/klines", {
-        "symbol": symbol, "interval": interval, "limit": limit,
-    })
-    keys = ["openTime", "open", "high", "low", "close", "volume",
-            "closeTime", "quoteVolume", "trades", "takerBuyVolume", "takerBuyQuoteVolume", "_ignore"]
-    return [{k: v for k, v in zip(keys, row) if k != "_ignore"} for row in raw]
+    raw = await _client(ctx).get(
+        "/fapi/v1/klines",
+        {
+            "symbol": symbol,
+            "interval": interval,
+            "limit": limit,
+        },
+    )
+    keys = [
+        "openTime",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "closeTime",
+        "quoteVolume",
+        "trades",
+        "takerBuyVolume",
+        "takerBuyQuoteVolume",
+        "_ignore",
+    ]
+    return [{k: v for k, v in zip(keys, row, strict=False) if k != "_ignore"} for row in raw]
 
 
 @mcp.tool
@@ -161,7 +183,9 @@ async def get_symbol_info(
                 "stepSize": filters.get("LOT_SIZE", {}).get("stepSize"),
                 "minQty": filters.get("LOT_SIZE", {}).get("minQty"),
                 "minNotional": filters.get("MIN_NOTIONAL", {}).get("notional"),
-                "maxLeverage": s.get("leverageBracket", [{}])[0].get("initialLeverage") if s.get("leverageBracket") else None,
+                "maxLeverage": s.get("leverageBracket", [{}])[0].get("initialLeverage")
+                if s.get("leverageBracket")
+                else None,
                 "marginTypes": s.get("marginTypes", []),
                 "orderTypes": s.get("orderTypes", []),
             }
@@ -171,6 +195,7 @@ async def get_symbol_info(
 # ═════════════════════════════════════════════════════════════════════════════
 # ACCOUNT  (signed USER_DATA)
 # ═════════════════════════════════════════════════════════════════════════════
+
 
 @mcp.tool
 async def get_balance(ctx: Context) -> list[dict]:
@@ -196,7 +221,10 @@ async def get_balance(ctx: Context) -> list[dict]:
 @mcp.tool
 async def get_positions(
     ctx: Context,
-    symbol: Annotated[str | None, Field(description="Filter to one symbol, e.g. 'BTCUSDT'. Omit for all open positions.")] = None,
+    symbol: Annotated[
+        str | None,
+        Field(description="Filter to one symbol, e.g. 'BTCUSDT'. Omit for all open positions."),
+    ] = None,
 ) -> list[dict]:
     """Get current open positions (non-zero size).
 
@@ -211,24 +239,26 @@ async def get_positions(
         if size == 0:
             continue
         entry = float(p["entryPrice"])
-        mark = float(p["markPrice"])
+        float(p["markPrice"])
         pnl = float(p["unRealizedProfit"])
         notional = abs(size * entry)
         pct = (pnl / notional * 100) if notional else 0
-        result.append({
-            "symbol": p["symbol"],
-            "side": "LONG" if size > 0 else "SHORT",
-            "size": p["positionAmt"],
-            "entryPrice": p["entryPrice"],
-            "markPrice": p["markPrice"],
-            "unrealizedPnl": p["unRealizedProfit"],
-            "pnlPct": round(pct, 4),
-            "leverage": p["leverage"],
-            "marginType": p["marginType"],
-            "isolatedMargin": p["isolatedMargin"],
-            "liquidationPrice": p["liquidationPrice"],
-            "positionSide": p["positionSide"],
-        })
+        result.append(
+            {
+                "symbol": p["symbol"],
+                "side": "LONG" if size > 0 else "SHORT",
+                "size": p["positionAmt"],
+                "entryPrice": p["entryPrice"],
+                "markPrice": p["markPrice"],
+                "unrealizedPnl": p["unRealizedProfit"],
+                "pnlPct": round(pct, 4),
+                "leverage": p["leverage"],
+                "marginType": p["marginType"],
+                "isolatedMargin": p["isolatedMargin"],
+                "liquidationPrice": p["liquidationPrice"],
+                "positionSide": p["positionSide"],
+            }
+        )
     return result
 
 
@@ -251,6 +281,7 @@ async def get_account_summary(ctx: Context) -> dict:
 # ═════════════════════════════════════════════════════════════════════════════
 # ORDERS  (signed TRADE)
 # ═════════════════════════════════════════════════════════════════════════════
+
 
 @mcp.tool
 async def get_open_orders(
@@ -276,7 +307,9 @@ async def get_order(
     """Get details of a specific order by orderId or clientOrderId."""
     if not order_id and not client_order_id:
         raise ValueError("Provide either order_id or client_order_id")
-    params = _strip_none({"symbol": symbol, "orderId": order_id, "origClientOrderId": client_order_id})
+    params = _strip_none(
+        {"symbol": symbol, "orderId": order_id, "origClientOrderId": client_order_id}
+    )
     return _format_order(await _client(ctx).get_signed("/fapi/v1/order", params))
 
 
@@ -284,7 +317,9 @@ async def get_order(
 async def get_order_history(
     ctx: Context,
     symbol: Annotated[str, Field(description="Trading pair, e.g. 'BTCUSDT'")],
-    limit: Annotated[int, Field(description="Number of orders to return (max 1000)", ge=1, le=1000)] = 50,
+    limit: Annotated[
+        int, Field(description="Number of orders to return (max 1000)", ge=1, le=1000)
+    ] = 50,
 ) -> list[dict]:
     """Get recent order history for a symbol (all statuses)."""
     data = await _client(ctx).get_signed("/fapi/v1/allOrders", {"symbol": symbol, "limit": limit})
@@ -297,18 +332,56 @@ async def place_order(
     symbol: Annotated[str, Field(description="Trading pair, e.g. 'BTCUSDT'")],
     side: Annotated[Literal["BUY", "SELL"], Field(description="Order direction")],
     order_type: Annotated[
-        Literal["LIMIT", "MARKET", "STOP", "STOP_MARKET", "TAKE_PROFIT", "TAKE_PROFIT_MARKET", "TRAILING_STOP_MARKET"],
+        Literal[
+            "LIMIT",
+            "MARKET",
+            "STOP",
+            "STOP_MARKET",
+            "TAKE_PROFIT",
+            "TAKE_PROFIT_MARKET",
+            "TRAILING_STOP_MARKET",
+        ],
         Field(description="Order type"),
     ],
-    quantity: Annotated[float | None, Field(description="Order quantity in base asset. Required for most types.", gt=0)] = None,
-    price: Annotated[float | None, Field(description="Limit price. Required for LIMIT, STOP, TAKE_PROFIT.")] = None,
-    stop_price: Annotated[float | None, Field(description="Trigger price. Required for STOP, STOP_MARKET, TAKE_PROFIT, TAKE_PROFIT_MARKET.")] = None,
-    time_in_force: Annotated[Literal["GTC", "IOC", "FOK", "GTX"] | None, Field(description="Time in force. Required for LIMIT orders.")] = None,
-    reduce_only: Annotated[bool | None, Field(description="If True, order can only reduce an existing position.")] = None,
-    close_position: Annotated[bool | None, Field(description="If True, closes the entire position (STOP_MARKET / TAKE_PROFIT_MARKET).")] = None,
-    position_side: Annotated[Literal["BOTH", "LONG", "SHORT"] | None, Field(description="Required in Hedge Mode. Use BOTH for One-way mode.")] = None,
-    client_order_id: Annotated[str | None, Field(description="Optional custom order ID (max 36 chars).")] = None,
-    callback_rate: Annotated[float | None, Field(description="Trailing stop callback rate in % (0.1–5). Only for TRAILING_STOP_MARKET.")] = None,
+    quantity: Annotated[
+        float | None,
+        Field(description="Order quantity in base asset. Required for most types.", gt=0),
+    ] = None,
+    price: Annotated[
+        float | None, Field(description="Limit price. Required for LIMIT, STOP, TAKE_PROFIT.")
+    ] = None,
+    stop_price: Annotated[
+        float | None,
+        Field(
+            description="Trigger price. Required for STOP, STOP_MARKET, TAKE_PROFIT, TAKE_PROFIT_MARKET."
+        ),
+    ] = None,
+    time_in_force: Annotated[
+        Literal["GTC", "IOC", "FOK", "GTX"] | None,
+        Field(description="Time in force. Required for LIMIT orders."),
+    ] = None,
+    reduce_only: Annotated[
+        bool | None, Field(description="If True, order can only reduce an existing position.")
+    ] = None,
+    close_position: Annotated[
+        bool | None,
+        Field(
+            description="If True, closes the entire position (STOP_MARKET / TAKE_PROFIT_MARKET)."
+        ),
+    ] = None,
+    position_side: Annotated[
+        Literal["BOTH", "LONG", "SHORT"] | None,
+        Field(description="Required in Hedge Mode. Use BOTH for One-way mode."),
+    ] = None,
+    client_order_id: Annotated[
+        str | None, Field(description="Optional custom order ID (max 36 chars).")
+    ] = None,
+    callback_rate: Annotated[
+        float | None,
+        Field(
+            description="Trailing stop callback rate in % (0.1–5). Only for TRAILING_STOP_MARKET."
+        ),
+    ] = None,
 ) -> dict:
     """Place a new futures order.
 
@@ -318,20 +391,22 @@ async def place_order(
     - Stop loss:   side=SELL, type=STOP_MARKET, stop_price=45000, close_position=True
     - Take profit: side=SELL, type=TAKE_PROFIT_MARKET, stop_price=60000, close_position=True
     """
-    params = _strip_none({
-        "symbol": symbol,
-        "side": side,
-        "type": order_type,
-        "quantity": quantity,
-        "price": price,
-        "stopPrice": stop_price,
-        "timeInForce": time_in_force,
-        "reduceOnly": str(reduce_only).lower() if reduce_only is not None else None,
-        "closePosition": str(close_position).lower() if close_position is not None else None,
-        "positionSide": position_side,
-        "newClientOrderId": client_order_id,
-        "callbackRate": callback_rate,
-    })
+    params = _strip_none(
+        {
+            "symbol": symbol,
+            "side": side,
+            "type": order_type,
+            "quantity": quantity,
+            "price": price,
+            "stopPrice": stop_price,
+            "timeInForce": time_in_force,
+            "reduceOnly": str(reduce_only).lower() if reduce_only is not None else None,
+            "closePosition": str(close_position).lower() if close_position is not None else None,
+            "positionSide": position_side,
+            "newClientOrderId": client_order_id,
+            "callbackRate": callback_rate,
+        }
+    )
     return _format_order(await _client(ctx).post_signed("/fapi/v1/order", params))
 
 
@@ -341,21 +416,25 @@ async def modify_order(
     symbol: Annotated[str, Field(description="Trading pair, e.g. 'BTCUSDT'")],
     order_id: Annotated[int | None, Field(description="Binance order ID to modify")] = None,
     client_order_id: Annotated[str | None, Field(description="Client order ID to modify")] = None,
-    side: Annotated[Literal["BUY", "SELL"] | None, Field(description="Must match the original order side")] = None,
+    side: Annotated[
+        Literal["BUY", "SELL"] | None, Field(description="Must match the original order side")
+    ] = None,
     quantity: Annotated[float | None, Field(description="New quantity", gt=0)] = None,
     price: Annotated[float | None, Field(description="New limit price")] = None,
 ) -> dict:
     """Modify price or quantity of an existing open LIMIT order (PUT /fapi/v1/order)."""
     if not order_id and not client_order_id:
         raise ValueError("Provide either order_id or client_order_id")
-    params = _strip_none({
-        "symbol": symbol,
-        "orderId": order_id,
-        "origClientOrderId": client_order_id,
-        "side": side,
-        "quantity": quantity,
-        "price": price,
-    })
+    params = _strip_none(
+        {
+            "symbol": symbol,
+            "orderId": order_id,
+            "origClientOrderId": client_order_id,
+            "side": side,
+            "quantity": quantity,
+            "price": price,
+        }
+    )
     return _format_order(await _client(ctx).put_signed("/fapi/v1/order", params))
 
 
@@ -369,7 +448,9 @@ async def cancel_order(
     """Cancel a single open order by orderId or clientOrderId."""
     if not order_id and not client_order_id:
         raise ValueError("Provide either order_id or client_order_id")
-    params = _strip_none({"symbol": symbol, "orderId": order_id, "origClientOrderId": client_order_id})
+    params = _strip_none(
+        {"symbol": symbol, "orderId": order_id, "origClientOrderId": client_order_id}
+    )
     return _format_order(await _client(ctx).delete_signed("/fapi/v1/order", params))
 
 
@@ -396,6 +477,7 @@ async def get_trade_history(
 # POSITION MANAGEMENT  (signed TRADE)
 # ═════════════════════════════════════════════════════════════════════════════
 
+
 @mcp.tool
 async def set_leverage(
     ctx: Context,
@@ -403,23 +485,31 @@ async def set_leverage(
     leverage: Annotated[int, Field(description="Leverage multiplier (1–125)", ge=1, le=125)],
 ) -> dict:
     """Set leverage for a symbol. Returns the new leverage and max notional value."""
-    return await _client(ctx).post_signed("/fapi/v1/leverage", {"symbol": symbol, "leverage": leverage})
+    return await _client(ctx).post_signed(
+        "/fapi/v1/leverage", {"symbol": symbol, "leverage": leverage}
+    )
 
 
 @mcp.tool
 async def set_margin_type(
     ctx: Context,
     symbol: Annotated[str, Field(description="Trading pair, e.g. 'BTCUSDT'")],
-    margin_type: Annotated[Literal["ISOLATED", "CROSSED"], Field(description="ISOLATED or CROSSED margin mode")],
+    margin_type: Annotated[
+        Literal["ISOLATED", "CROSSED"], Field(description="ISOLATED or CROSSED margin mode")
+    ],
 ) -> dict:
     """Switch margin type for a symbol between ISOLATED and CROSSED.
 
     Note: Cannot change margin type while a position or open order exists.
     """
     try:
-        return await _client(ctx).post_signed("/fapi/v1/marginType", {
-            "symbol": symbol, "marginType": margin_type,
-        })
+        return await _client(ctx).post_signed(
+            "/fapi/v1/marginType",
+            {
+                "symbol": symbol,
+                "marginType": margin_type,
+            },
+        )
     except BinanceError as e:
         # -4046 = "No need to change margin type" — treat as success
         if e.code == -4046:
@@ -432,34 +522,46 @@ async def adjust_isolated_margin(
     ctx: Context,
     symbol: Annotated[str, Field(description="Trading pair, e.g. 'BTCUSDT'")],
     amount: Annotated[float, Field(description="Amount to add or remove", gt=0)],
-    direction: Annotated[Literal["add", "remove"], Field(description="'add' to increase margin, 'remove' to decrease")],
-    position_side: Annotated[Literal["BOTH", "LONG", "SHORT"] | None, Field(description="Required in Hedge Mode")] = None,
+    direction: Annotated[
+        Literal["add", "remove"],
+        Field(description="'add' to increase margin, 'remove' to decrease"),
+    ],
+    position_side: Annotated[
+        Literal["BOTH", "LONG", "SHORT"] | None, Field(description="Required in Hedge Mode")
+    ] = None,
 ) -> dict:
     """Add or remove margin from an isolated position.
 
     Only valid when the symbol is in ISOLATED margin mode with an open position.
     """
-    params = _strip_none({
-        "symbol": symbol,
-        "amount": amount,
-        "type": 1 if direction == "add" else 2,  # Binance: 1=add, 2=remove
-        "positionSide": position_side,
-    })
+    params = _strip_none(
+        {
+            "symbol": symbol,
+            "amount": amount,
+            "type": 1 if direction == "add" else 2,  # Binance: 1=add, 2=remove
+            "positionSide": position_side,
+        }
+    )
     return await _client(ctx).post_signed("/fapi/v1/positionMargin", params)
 
 
 @mcp.tool
 async def set_position_mode(
     ctx: Context,
-    hedge_mode: Annotated[bool, Field(description="True = Hedge Mode (LONG+SHORT), False = One-way Mode")],
+    hedge_mode: Annotated[
+        bool, Field(description="True = Hedge Mode (LONG+SHORT), False = One-way Mode")
+    ],
 ) -> dict:
     """Switch between One-way Mode and Hedge Mode for the account.
 
     Note: Cannot change while any positions or open orders exist.
     """
-    return await _client(ctx).post_signed("/fapi/v1/positionSide/dual", {
-        "dualSidePosition": str(hedge_mode).lower(),
-    })
+    return await _client(ctx).post_signed(
+        "/fapi/v1/positionSide/dual",
+        {
+            "dualSidePosition": str(hedge_mode).lower(),
+        },
+    )
 
 
 @mcp.tool
@@ -490,6 +592,7 @@ async def get_leverage_brackets(
 # INTERNAL HELPERS
 # ═════════════════════════════════════════════════════════════════════════════
 
+
 def _format_order(o: dict) -> dict:
     """Normalize an order dict to the fields most useful for decision-making."""
     return {
@@ -515,10 +618,12 @@ def _format_order(o: dict) -> dict:
 async def _gather(*coros):
     """Run coroutines concurrently and return results in order."""
     import asyncio
+
     return await asyncio.gather(*coros)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
+
 
 def main():
     mcp.run()

@@ -84,7 +84,7 @@ class BinanceClient:
             data = response.json()
         except Exception:
             if not response.is_success:
-                raise BinanceError(response.status_code, response.text)
+                raise BinanceError(response.status_code, response.text) from None
             return response.text
 
         if isinstance(data, dict) and "code" in data and data["code"] != 200:
