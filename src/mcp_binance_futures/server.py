@@ -354,35 +354,71 @@ async def place_order(
             "TAKE_PROFIT_MARKET",
             "TRAILING_STOP_MARKET",
         ],
-        Field(description="Order type"),
+        Field(
+            description=(
+                "Order type. Two distinct groups with different rules:\n"
+                "  ENTRY/EXIT orders (placed immediately, quantity required):\n"
+                "    MARKET           — executes at current market price\n"
+                "    LIMIT            — executes at `price` or better; requires price + time_in_force\n"
+                "  CONDITIONAL orders (wait for trigger, routed to Algo API):\n"
+                "    STOP_MARKET      — market exit when price hits stop_price (stop-loss)\n"
+                "    TAKE_PROFIT_MARKET — market exit when price hits stop_price (take-profit)\n"
+                "    STOP             — limit exit at `price` when stop_price is hit\n"
+                "    TAKE_PROFIT      — limit exit at `price` when stop_price is hit\n"
+                "    TRAILING_STOP_MARKET — trails price by callback_rate %"
+            )
+        ),
     ],
     quantity: Annotated[
         float | None,
-        Field(description="Order quantity in base asset. Required for most types.", gt=0),
+        Field(
+            description=(
+                "Order quantity in base asset. "
+                "Required for MARKET, LIMIT, STOP, TAKE_PROFIT, TRAILING_STOP_MARKET, "
+                "and conditional orders without close_position=True. "
+                "Omit only when using close_position=True (closes the full position)."
+            ),
+            gt=0,
+        ),
     ] = None,
     price: Annotated[
-        float | None, Field(description="Limit price. Required for LIMIT, STOP, TAKE_PROFIT.")
+        float | None,
+        Field(description="Limit fill price. Required for LIMIT, STOP, TAKE_PROFIT."),
     ] = None,
     stop_price: Annotated[
         float | None,
         Field(
-            description="Trigger price. Required for STOP, STOP_MARKET, TAKE_PROFIT, TAKE_PROFIT_MARKET."
+            description=(
+                "Trigger price. Required for all conditional types: "
+                "STOP, STOP_MARKET, TAKE_PROFIT, TAKE_PROFIT_MARKET, TRAILING_STOP_MARKET."
+            )
         ),
     ] = None,
     time_in_force: Annotated[
         Literal["GTC", "IOC", "FOK", "GTX"] | None,
-        Field(description="Time in force. Required for LIMIT orders."),
+        Field(
+            description="Time in force. Required for LIMIT. Optional for conditional orders (default GTC)."
+        ),
     ] = None,
     reduce_only: Annotated[
-        bool | None, Field(description="If True, order can only reduce an existing position.")
+        bool | None,
+        Field(
+            description=(
+                "If True, order can only reduce an existing position (partial close). "
+                "Use this with a specific quantity to partially close. "
+                "Cannot be combined with close_position=True."
+            )
+        ),
     ] = None,
     close_position: Annotated[
         bool | None,
         Field(
-            "If True, closes the entire position at trigger (Close-All). "
-            "ONLY valid with STOP_MARKET or TAKE_PROFIT_MARKET. "
-            "Binance allows at most 1 SL and 1 TP with close_position=True per direction — "
-            "cancel the existing one first if you need to replace it."
+            description=(
+                "If True, closes the ENTIRE position when triggered (Close-All). "
+                "Only valid with STOP_MARKET or TAKE_PROFIT_MARKET. Do NOT send quantity. "
+                "Binance allows at most 1 active close_position=True order per type per direction — "
+                "cancel the existing one first before placing a replacement."
+            )
         ),
     ] = None,
     position_side: Annotated[
@@ -395,24 +431,28 @@ async def place_order(
     callback_rate: Annotated[
         float | None,
         Field(
-            description="Trailing stop callback rate in % (0.1–5). Only for TRAILING_STOP_MARKET."
+            description="Trailing stop callback rate in % (0.1–10). Only for TRAILING_STOP_MARKET."
         ),
     ] = None,
 ) -> dict:
     """Place a new futures order.
 
-    Common patterns:
-    - Market buy:   side=BUY,  type=MARKET,             quantity=0.01
-    - Limit sell:   side=SELL, type=LIMIT,              quantity=0.01, price=50000, time_in_force=GTC
-    - Stop loss:    side=SELL, type=STOP_MARKET,        stop_price=45000, close_position=True
-    - Take profit:  side=SELL, type=TAKE_PROFIT_MARKET, stop_price=60000, close_position=True
+    ORDER TYPE GROUPS — choose the right one:
 
-    Note: STOP_MARKET, TAKE_PROFIT_MARKET, STOP, TAKE_PROFIT, TRAILING_STOP_MARKET are
-    automatically routed to the Binance Algo Order API (/fapi/v1/algoOrder) as required
-    since the 2025-12-09 Binance migration.
+    Immediate orders (fill now or queue at price):
+      MARKET:  side=BUY,  quantity=0.01
+      LIMIT:   side=SELL, quantity=0.01, price=50000, time_in_force=GTC
 
-    Note: With close_position=True, Binance only allows 1 SL and 1 TP per direction
-    (closes entire position). Cancel the existing order first if you need to replace it.
+    Conditional orders (wait for stop_price trigger, then execute):
+      Stop-loss  full close: side=SELL, type=STOP_MARKET,        stop_price=45000, close_position=True
+      Take-profit full close: side=SELL, type=TAKE_PROFIT_MARKET, stop_price=60000, close_position=True
+      Stop-loss  partial:    side=SELL, type=STOP_MARKET,        stop_price=45000, quantity=0.01, reduce_only=True
+      Trailing stop:         side=SELL, type=TRAILING_STOP_MARKET, stop_price=45000, quantity=0.01, callback_rate=1.0
+
+    IMPORTANT — close_position=True vs quantity+reduce_only:
+      close_position=True  → closes the ENTIRE position, no quantity needed, max 1 SL + 1 TP active at a time.
+      reduce_only=True     → closes a PARTIAL quantity, multiple allowed simultaneously.
+      Never mix both on the same order.
     """
     # Conditional order types must use the Algo API since 2025-12-09
     _ALGO_ORDER_TYPES = {
