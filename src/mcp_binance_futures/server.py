@@ -16,7 +16,7 @@ from fastmcp import Context, FastMCP
 from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
 from pydantic import Field
 
-from client import BinanceClient, BinanceError
+from mcp_binance_futures.client import BinanceClient, BinanceError
 
 # ── Lifespan: one shared client for the server's lifetime ─────────────────────
 

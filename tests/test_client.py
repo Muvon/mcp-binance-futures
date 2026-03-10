@@ -11,7 +11,7 @@ import httpx
 import pytest
 import respx
 
-from client import BASE_URL, BinanceClient, BinanceError
+from mcp_binance_futures.client import BASE_URL, BinanceClient, BinanceError
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 

@@ -9,7 +9,7 @@ import pytest
 import respx
 from fastmcp import Client
 
-import server  # registers all tools on server.mcp
+from mcp_binance_futures import server  # registers all tools on server.mcp
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
