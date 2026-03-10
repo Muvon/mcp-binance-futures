@@ -551,3 +551,82 @@ async def test_get_leverage_brackets(monkeypatch):
             result = await c.call_tool("get_leverage_brackets", {"symbol": "BTCUSDT"})
 
     assert result.structured_content["result"][0]["initialLeverage"] == 125
+
+
+# ── place_order validation guards ────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_place_order_close_position_invalid_type(monkeypatch):
+    """close_position=True with MARKET should raise before hitting Binance."""
+    mock_env(monkeypatch)
+    with respx.mock():
+        async with Client(server.mcp) as c:
+            with pytest.raises(Exception, match="close_position"):
+                await c.call_tool(
+                    "place_order",
+                    {
+                        "symbol": "AAVEUSDT",
+                        "side": "SELL",
+                        "order_type": "MARKET",
+                        "close_position": True,
+                    },
+                )
+
+
+@pytest.mark.asyncio
+async def test_place_order_reduce_only_and_close_position_conflict(monkeypatch):
+    """reduce_only and close_position cannot both be True."""
+    mock_env(monkeypatch)
+    with respx.mock():
+        async with Client(server.mcp) as c:
+            with pytest.raises(Exception, match="reduce_only"):
+                await c.call_tool(
+                    "place_order",
+                    {
+                        "symbol": "BTCUSDT",
+                        "side": "SELL",
+                        "order_type": "STOP_MARKET",
+                        "stop_price": 45000.0,
+                        "reduce_only": True,
+                        "close_position": True,
+                    },
+                )
+
+
+@pytest.mark.asyncio
+async def test_place_limit_order_missing_time_in_force(monkeypatch):
+    """LIMIT order without time_in_force should raise."""
+    mock_env(monkeypatch)
+    with respx.mock():
+        async with Client(server.mcp) as c:
+            with pytest.raises(Exception, match="time_in_force"):
+                await c.call_tool(
+                    "place_order",
+                    {
+                        "symbol": "BTCUSDT",
+                        "side": "BUY",
+                        "order_type": "LIMIT",
+                        "quantity": 0.01,
+                        "price": 49000.0,
+                    },
+                )
+
+
+@pytest.mark.asyncio
+async def test_place_order_callback_rate_wrong_type(monkeypatch):
+    """callback_rate on a non-TRAILING_STOP_MARKET order should raise."""
+    mock_env(monkeypatch)
+    with respx.mock():
+        async with Client(server.mcp) as c:
+            with pytest.raises(Exception, match="callback_rate"):
+                await c.call_tool(
+                    "place_order",
+                    {
+                        "symbol": "BTCUSDT",
+                        "side": "BUY",
+                        "order_type": "MARKET",
+                        "quantity": 0.01,
+                        "callback_rate": 1.0,
+                    },
+                )

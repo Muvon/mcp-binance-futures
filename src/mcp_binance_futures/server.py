@@ -106,7 +106,10 @@ async def get_ticker(
 async def get_order_book(
     ctx: Context,
     symbol: Annotated[str, Field(description="Trading pair, e.g. 'BTCUSDT'")],
-    limit: Annotated[int, Field(description="Depth levels: 5, 10, 20, 50, 100", ge=5, le=100)] = 20,
+    limit: Annotated[
+        Literal[5, 10, 20, 50, 100, 500, 1000],
+        Field(description="Depth levels: 5, 10, 20, 50, 100, 500, 1000"),
+    ] = 20,
 ) -> dict[str, Any]:
     """Get order book bids and asks for a symbol.
 
@@ -250,7 +253,6 @@ async def get_positions(
         if size == 0:
             continue
         entry = float(p["entryPrice"])
-        float(p["markPrice"])
         pnl = float(p["unRealizedProfit"])
         notional = abs(size * entry)
         pct = (pnl / notional * 100) if notional else 0
@@ -377,7 +379,11 @@ async def place_order(
     close_position: Annotated[
         bool | None,
         Field(
-            description="If True, closes the entire position (STOP_MARKET / TAKE_PROFIT_MARKET)."
+            description=(
+                "If True, closes the entire position at trigger. "
+                "ONLY valid with order_type STOP_MARKET or TAKE_PROFIT_MARKET. "
+                "Cannot be used with MARKET, LIMIT, or other types."
+            )
         ),
     ] = None,
     position_side: Annotated[
@@ -402,6 +408,19 @@ async def place_order(
     - Stop loss:   side=SELL, type=STOP_MARKET, stop_price=45000, close_position=True
     - Take profit: side=SELL, type=TAKE_PROFIT_MARKET, stop_price=60000, close_position=True
     """
+    if close_position and order_type not in ("STOP_MARKET", "TAKE_PROFIT_MARKET"):
+        raise ValueError(
+            f"close_position=True is only valid with STOP_MARKET or TAKE_PROFIT_MARKET, "
+            f"got order_type={order_type!r}"
+        )
+    if reduce_only and close_position:
+        raise ValueError("reduce_only and close_position cannot both be True")
+    if order_type == "LIMIT" and not time_in_force:
+        raise ValueError("time_in_force is required for LIMIT orders")
+    if callback_rate is not None and order_type != "TRAILING_STOP_MARKET":
+        raise ValueError(
+            f"callback_rate is only valid for TRAILING_STOP_MARKET, got order_type={order_type!r}"
+        )
     params = _strip_none(
         {
             "symbol": symbol,
@@ -425,11 +444,11 @@ async def place_order(
 async def modify_order(
     ctx: Context,
     symbol: Annotated[str, Field(description="Trading pair, e.g. 'BTCUSDT'")],
+    side: Annotated[
+        Literal["BUY", "SELL"], Field(description="Must match the original order side")
+    ],
     order_id: Annotated[int | None, Field(description="Binance order ID to modify")] = None,
     client_order_id: Annotated[str | None, Field(description="Client order ID to modify")] = None,
-    side: Annotated[
-        Literal["BUY", "SELL"] | None, Field(description="Must match the original order side")
-    ] = None,
     quantity: Annotated[float | None, Field(description="New quantity", gt=0)] = None,
     price: Annotated[float | None, Field(description="New limit price")] = None,
 ) -> dict:
