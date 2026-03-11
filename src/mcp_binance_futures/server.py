@@ -300,14 +300,39 @@ async def get_account_summary(ctx: Context) -> dict:
 async def get_open_orders(
     ctx: Context,
     symbol: Annotated[str, Field(description="Trading pair, e.g. 'BTCUSDT'")],
+    source: Annotated[
+        Literal["regular", "algo", "all"],
+        Field(
+            description=(
+                "Which orders to fetch: "
+                "'regular' = standard orders (LIMIT/MARKET), "
+                "'algo' = conditional orders (STOP_MARKET/TAKE_PROFIT_MARKET/etc.), "
+                "'all' = both merged (default). "
+                "Algo orders include '_isAlgo': True — pass is_algo=True to cancel_order for those."
+            )
+        ),
+    ] = "all",
 ) -> list[dict]:
-    """Get all open orders for a symbol.
+    """Get open orders for a symbol.
 
-    Returns list of: orderId, clientOrderId, type, side, price, origQty,
-    executedQty, status, timeInForce, reduceOnly, positionSide.
+    Returns list of: orderId, clientOrderId, symbol, status, type, side,
+    positionSide, price, origQty, executedQty, avgPrice, stopPrice,
+    timeInForce, reduceOnly, closePosition, updateTime.
+    Algo (conditional) orders also include '_isAlgo': True.
     """
-    data = await _client(ctx).get_signed("/fapi/v1/openOrders", {"symbol": symbol})
-    return [_format_order(o) for o in data]
+    c = _client(ctx)
+    if source == "regular":
+        data = await c.get_signed("/fapi/v1/openOrders", {"symbol": symbol})
+        return [_format_order(o) for o in data]
+    if source == "algo":
+        data = await c.get_signed("/fapi/v1/openAlgoOrders", {"symbol": symbol})
+        return [_format_algo_order(o) for o in data]
+    # "all": fetch both in parallel and merge
+    regular_data, algo_data = await _gather(
+        c.get_signed("/fapi/v1/openOrders", {"symbol": symbol}),
+        c.get_signed("/fapi/v1/openAlgoOrders", {"symbol": symbol}),
+    )
+    return [_format_order(o) for o in regular_data] + [_format_algo_order(o) for o in algo_data]
 
 
 @mcp.tool
@@ -553,10 +578,28 @@ async def cancel_order(
     symbol: Annotated[str, Field(description="Trading pair, e.g. 'BTCUSDT'")],
     order_id: Annotated[int | None, Field(description="Binance order ID to cancel")] = None,
     client_order_id: Annotated[str | None, Field(description="Client order ID to cancel")] = None,
+    is_algo: Annotated[
+        bool,
+        Field(
+            description=(
+                "Set True for conditional orders (STOP_MARKET/TAKE_PROFIT_MARKET/etc.). "
+                "Read '_isAlgo' from get_open_orders results to determine this."
+            )
+        ),
+    ] = False,
 ) -> dict:
-    """Cancel a single open order by orderId or clientOrderId."""
-    if not order_id and not client_order_id:
+    """Cancel a single open order by orderId or clientOrderId.
+
+    For algo (conditional) orders returned by get_open_orders with '_isAlgo': True,
+    set is_algo=True — this routes to the Algo API using algoId.
+    """
+    if order_id is None and client_order_id is None:
         raise ValueError("Provide either order_id or client_order_id")
+    if is_algo:
+        params = _strip_none({"algoId": order_id, "clientAlgoId": client_order_id})
+        return _format_algo_order(
+            await _client(ctx).delete_signed("/fapi/v1/algoOrder", params)
+        )
     params = _strip_none(
         {"symbol": symbol, "orderId": order_id, "origClientOrderId": client_order_id}
     )
@@ -567,9 +610,34 @@ async def cancel_order(
 async def cancel_all_orders(
     ctx: Context,
     symbol: Annotated[str, Field(description="Trading pair, e.g. 'BTCUSDT'")],
+    source: Annotated[
+        Literal["regular", "algo", "all"],
+        Field(
+            description=(
+                "Which orders to cancel: "
+                "'regular' = standard orders only, "
+                "'algo' = conditional orders only (STOP_MARKET/TAKE_PROFIT_MARKET/etc.), "
+                "'all' = both (default)."
+            )
+        ),
+    ] = "all",
 ) -> dict:
-    """Cancel ALL open orders for a symbol in one call."""
-    return await _client(ctx).delete_signed("/fapi/v1/allOpenOrders", {"symbol": symbol})
+    """Cancel all open orders for a symbol.
+
+    With source='all' (default), cancels both regular and algo (conditional) orders in parallel.
+    """
+    c = _client(ctx)
+    if source == "regular":
+        return await c.delete_signed("/fapi/v1/allOpenOrders", {"symbol": symbol})
+    if source == "algo":
+        return await c.delete_signed("/fapi/v1/algoOpenOrders", {"symbol": symbol})
+    # "all": cancel both in parallel
+    regular_result, algo_result = await _gather(
+        c.delete_signed("/fapi/v1/allOpenOrders", {"symbol": symbol}),
+        c.delete_signed("/fapi/v1/algoOpenOrders", {"symbol": symbol}),
+    )
+
+    return {"regular": regular_result, "algo": algo_result}
 
 
 @mcp.tool
@@ -743,6 +811,7 @@ def _format_algo_order(o: dict) -> dict:
         "reduceOnly": o.get("reduceOnly"),
         "closePosition": o.get("closePosition"),
         "updateTime": o.get("updateTime"),
+        "_isAlgo": True,
     }
 
 

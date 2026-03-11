@@ -277,6 +277,23 @@ ORDER_STUB = {
     "updateTime": 1700000000000,
 }
 
+ALGO_ORDER_STUB = {
+    "algoId": 999,
+    "clientAlgoId": "myAlgo1",
+    "symbol": "BTCUSDT",
+    "algoStatus": "WORKING",
+    "orderType": "STOP_MARKET",
+    "side": "SELL",
+    "positionSide": "BOTH",
+    "price": "0",
+    "quantity": "0.01",
+    "triggerPrice": "45000.00",
+    "timeInForce": "GTC",
+    "reduceOnly": False,
+    "closePosition": False,
+    "updateTime": 1700000000000,
+}
+
 
 @pytest.mark.asyncio
 async def test_place_limit_order(monkeypatch):
@@ -327,16 +344,25 @@ async def test_place_market_order(monkeypatch):
 @pytest.mark.asyncio
 async def test_place_stop_market_close(monkeypatch):
     mock_env(monkeypatch)
-    stop = {
-        **ORDER_STUB,
-        "type": "STOP_MARKET",
+    algo_stop = {
+        "algoId": 999,
+        "clientAlgoId": "myAlgo1",
+        "symbol": "BTCUSDT",
+        "algoStatus": "WORKING",
+        "orderType": "STOP_MARKET",
         "side": "SELL",
+        "positionSide": "BOTH",
+        "price": "0",
+        "quantity": "0",
+        "triggerPrice": "45000.00",
+        "timeInForce": "GTC",
+        "reduceOnly": False,
         "closePosition": True,
-        "stopPrice": "45000.00",
+        "updateTime": 1700000000000,
     }
     with respx.mock() as mock:
-        mock.post("https://fapi.binance.com/fapi/v1/order").mock(
-            return_value=httpx.Response(200, json=stop)
+        mock.post("https://fapi.binance.com/fapi/v1/algoOrder").mock(
+            return_value=httpx.Response(200, json=algo_stop)
         )
         async with Client(server.mcp) as c:
             result = await c.call_tool(
@@ -351,6 +377,7 @@ async def test_place_stop_market_close(monkeypatch):
             )
 
     assert result.structured_content["closePosition"] is True
+    assert result.structured_content["_isAlgo"] is True
 
 
 @pytest.mark.asyncio
@@ -379,16 +406,20 @@ async def test_cancel_order_requires_id(monkeypatch):
 @pytest.mark.asyncio
 async def test_cancel_all_orders(monkeypatch):
     mock_env(monkeypatch)
+    regular_resp = {"code": 200, "msg": "The operation of cancel all open order is done."}
+    algo_resp = {"code": 200, "msg": "The operation of cancel all algo order is done."}
     with respx.mock() as mock:
         mock.delete("https://fapi.binance.com/fapi/v1/allOpenOrders").mock(
-            return_value=httpx.Response(
-                200, json={"code": 200, "msg": "The operation of cancel all open order is done."}
-            )
+            return_value=httpx.Response(200, json=regular_resp)
+        )
+        mock.delete("https://fapi.binance.com/fapi/v1/algoOpenOrders").mock(
+            return_value=httpx.Response(200, json=algo_resp)
         )
         async with Client(server.mcp) as c:
             result = await c.call_tool("cancel_all_orders", {"symbol": "BTCUSDT"})
 
-    assert result.structured_content["code"] == 200
+    assert result.structured_content["regular"]["code"] == 200
+    assert result.structured_content["algo"]["code"] == 200
 
 
 @pytest.mark.asyncio
@@ -421,11 +452,19 @@ async def test_get_open_orders(monkeypatch):
         mock.get("https://fapi.binance.com/fapi/v1/openOrders").mock(
             return_value=httpx.Response(200, json=[ORDER_STUB])
         )
+        mock.get("https://fapi.binance.com/fapi/v1/openAlgoOrders").mock(
+            return_value=httpx.Response(200, json=[ALGO_ORDER_STUB])
+        )
         async with Client(server.mcp) as c:
             result = await c.call_tool("get_open_orders", {"symbol": "BTCUSDT"})
 
-    assert len(result.structured_content["result"]) == 1
-    assert result.structured_content["result"][0]["orderId"] == 123456
+    orders = result.structured_content["result"]
+    assert len(orders) == 2
+    regular = next(o for o in orders if not o.get("_isAlgo"))
+    algo = next(o for o in orders if o.get("_isAlgo"))
+    assert regular["orderId"] == 123456
+    assert algo["orderId"] == 999
+    assert algo["stopPrice"] == "45000.00"
 
 
 # ── Position management ───────────────────────────────────────────────────────
