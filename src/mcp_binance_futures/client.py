@@ -87,8 +87,8 @@ class BinanceClient:
                 raise BinanceError(response.status_code, response.text) from None
             return response.text
 
-        if isinstance(data, dict) and "code" in data and data["code"] != 200:
-            raise BinanceError(data["code"], data.get("msg", "unknown error"))
+        if isinstance(data, dict) and "code" in data and int(data["code"]) != 200:
+            raise BinanceError(int(data["code"]), data.get("msg", "unknown error"))
 
         if not response.is_success:
             msg = data.get("msg", response.text) if isinstance(data, dict) else response.text
