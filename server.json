@@ -1,0 +1,36 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.muvon/mcp-binance-futures",
+  "description": "MCP server for Binance USDT-M Futures trading. Provides tools for market data, account state, order management, and position/margin control — gives an LLM everything it needs to monitor, place, and manage futures trades.",
+  "repository": {
+    "url": "https://github.com/muvon/mcp-binance-futures",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "mcp-binance-futures",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "description": "Binance API Key with Futures trading enabled",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": true,
+          "name": "BINANCE_API_KEY"
+        },
+        {
+          "description": "Binance API Secret",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": true,
+          "name": "BINANCE_API_SECRET"
+        }
+      ]
+    }
+  ]
+}
