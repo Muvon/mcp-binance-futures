@@ -551,9 +551,9 @@ async def modify_order(
     side: Annotated[
         Literal["BUY", "SELL"], Field(description="Must match the original order side")
     ],
+    quantity: Annotated[float, Field(description="New quantity", gt=0)],
     order_id: Annotated[int | None, Field(description="Binance order ID to modify")] = None,
     client_order_id: Annotated[str | None, Field(description="Client order ID to modify")] = None,
-    quantity: Annotated[float | None, Field(description="New quantity", gt=0)] = None,
     price: Annotated[float | None, Field(description="New limit price")] = None,
 ) -> dict:
     """Modify price or quantity of an existing open LIMIT order (PUT /fapi/v1/order)."""
@@ -597,9 +597,7 @@ async def cancel_order(
         raise ValueError("Provide either order_id or client_order_id")
     if is_algo:
         params = _strip_none({"algoId": order_id, "clientAlgoId": client_order_id})
-        return _format_algo_order(
-            await _client(ctx).delete_signed("/fapi/v1/algoOrder", params)
-        )
+        return _format_algo_order(await _client(ctx).delete_signed("/fapi/v1/algoOrder", params))
     params = _strip_none(
         {"symbol": symbol, "orderId": order_id, "origClientOrderId": client_order_id}
     )
