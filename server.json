@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.muvon/mcp-binance-futures",
-  "description": "MCP server for Binance USDT-M Futures trading. Provides tools for market data, account state, order management, and position/margin control — gives an LLM everything it needs to monitor, place, and manage futures trades.",
+  "name": "io.github.Muvon/mcp-binance-futures",
+  "description": "Binance USDT-M Futures MCP: market data, orders, positions, and margin control for LLM trading.",
   "repository": {
     "url": "https://github.com/muvon/mcp-binance-futures",
     "source": "github"
