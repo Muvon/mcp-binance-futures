@@ -4,6 +4,10 @@ MCP server for **Binance USDT-M Futures** trading. Exposes tools for market data
 
 Built with [FastMCP](https://github.com/jlowin/fastmcp) and [httpx](https://www.python-httpx.org/).
 
+<a href="https://glama.ai/mcp/servers/Muvon/mcp-binance-futures">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/Muvon/mcp-binance-futures/badge" alt="mcp-binance-futures MCP server" />
+</a>
+
 ---
 
 ## Tools
