@@ -87,6 +87,10 @@ export BINANCE_API_SECRET="your_api_secret"
 
 ---
 
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/muvon-mcp-binance-futures).
+
 ## Running
 
 ```bash
