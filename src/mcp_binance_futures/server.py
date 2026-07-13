@@ -9,7 +9,9 @@ Environment variables required:
     BINANCE_API_SECRET  — Binance API secret
 """
 
+import time as _time
 from contextlib import asynccontextmanager
+from decimal import ROUND_CEILING, ROUND_DOWN, ROUND_HALF_UP, Decimal
 from typing import Annotated, Any, Literal, cast
 
 from fastmcp import Context, FastMCP
@@ -57,6 +59,77 @@ def _client(ctx: Context) -> BinanceClient:
 def _strip_none(d: dict[str, Any]) -> dict[str, Any]:
     """Remove keys whose value is None so they are not sent to Binance."""
     return {k: v for k, v in d.items() if v is not None}
+
+
+# ── Deterministic order-filter snapping ───────────────────────────────────────
+# LLMs compute raw floats (e.g. splitting a near-minimum position 30/40/30 yields
+# 0.0004 BTC or 0.03 AAVE) that violate the pair's LOT_SIZE stepSize / minQty /
+# MIN_NOTIONAL → Binance rejects with -1111 (precision), -1013 (minQty) or -4164
+# (minNotional), silently dropping protective legs. We snap every quantity/price
+# to the symbol's exchange filters here so placement is deterministic and valid
+# regardless of what the model produced.
+
+_EXINFO_CACHE: dict[str, Any] = {}  # {"data": {symbol: info}, "ts": monotonic}
+_EXINFO_TTL = 3600.0
+
+
+async def _symbol_filters(ctx: Context, symbol: str) -> dict[str, float]:
+    """Per-symbol stepSize/minQty/tickSize/minNotional + precisions (exchangeInfo cached 1h)."""
+    now = _time.monotonic()
+    data = _EXINFO_CACHE.get("data")
+    if data is None or now - _EXINFO_CACHE.get("ts", 0.0) > _EXINFO_TTL:
+        info = await _client(ctx).get("/fapi/v1/exchangeInfo")
+        data = {s["symbol"]: s for s in info["symbols"]}
+        _EXINFO_CACHE["data"] = data
+        _EXINFO_CACHE["ts"] = now
+    s = data.get(symbol.upper())
+    if not s:
+        return {}
+    f = {x["filterType"]: x for x in s.get("filters", [])}
+    lot = f.get("LOT_SIZE", {})
+    return {
+        "step": float(lot.get("stepSize") or 0),
+        "minQty": float(lot.get("minQty") or 0),
+        "tick": float(f.get("PRICE_FILTER", {}).get("tickSize") or 0),
+        "minNotional": float(f.get("MIN_NOTIONAL", {}).get("notional") or 0),
+        "qtyPrec": int(s.get("quantityPrecision", 8)),
+        "pricePrec": int(s.get("pricePrecision", 8)),
+    }
+
+
+def _snap_qty(
+    qty: float,
+    step: float,
+    min_qty: float,
+    prec: int,
+    ref_price: float | None = None,
+    min_notional: float = 0.0,
+) -> float:
+    """Snap a quantity DOWN to a stepSize multiple, then up to minQty and (if a
+    reference price is known) up to minNotional. Result is a valid tradeable size."""
+    q = Decimal(str(qty))
+    d_step = Decimal(str(step)) if step and step > 0 else Decimal(0)
+    if d_step > 0:
+        q = (q / d_step).to_integral_value(rounding=ROUND_DOWN) * d_step
+    if min_qty and q < Decimal(str(min_qty)):
+        q = Decimal(str(min_qty))
+    if min_notional and ref_price and ref_price > 0:
+        need = Decimal(str(min_notional)) / Decimal(str(ref_price))
+        if q < need:
+            if d_step > 0:
+                q = (need / d_step).to_integral_value(rounding=ROUND_CEILING) * d_step
+            else:
+                q = need
+    return float(q.quantize(Decimal(1).scaleb(-prec)))
+
+
+def _snap_price(price: float, tick: float, prec: int) -> float:
+    """Snap a price to the nearest tickSize multiple."""
+    p = Decimal(str(price))
+    if tick and tick > 0:
+        d_tick = Decimal(str(tick))
+        p = (p / d_tick).to_integral_value(rounding=ROUND_HALF_UP) * d_tick
+    return float(p.quantize(Decimal(1).scaleb(-prec)))
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -501,6 +574,25 @@ async def place_order(
         raise ValueError(
             f"callback_rate is only valid for TRAILING_STOP_MARKET, got order_type={order_type!r}"
         )
+
+    # Snap quantity/price to the pair's exchange filters (deterministic, pair-aware)
+    # so a raw model-computed float can't be rejected for precision/minQty/minNotional.
+    filt = await _symbol_filters(ctx, symbol)
+    if filt:
+        if price is not None:
+            price = _snap_price(price, filt["tick"], int(filt["pricePrec"]))
+        if stop_price is not None:
+            stop_price = _snap_price(stop_price, filt["tick"], int(filt["pricePrec"]))
+        if quantity is not None and not close_position:
+            ref_price = price if price is not None else stop_price
+            quantity = _snap_qty(
+                quantity,
+                filt["step"],
+                filt["minQty"],
+                int(filt["qtyPrec"]),
+                ref_price,
+                filt["minNotional"],
+            )
 
     if order_type in _ALGO_ORDER_TYPES:
         # Algo API uses `triggerPrice` instead of `stopPrice`, and requires `algoType`
