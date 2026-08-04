@@ -298,7 +298,20 @@ ALGO_ORDER_STUB = {
 @pytest.mark.asyncio
 async def test_place_limit_order(monkeypatch):
     mock_env(monkeypatch)
-    with respx.mock() as mock:
+    with respx.mock(assert_all_called=False) as mock:
+        mock.get("https://fapi.binance.com/fapi/v1/exchangeInfo").mock(
+            return_value=httpx.Response(200, json={"symbols": [{"symbol": "BTCUSDT", "filters": [
+                {"filterType": "PRICE_FILTER", "tickSize": "0.10"},
+                {"filterType": "LOT_SIZE", "stepSize": "0.001", "minQty": "0.001"},
+                {"filterType": "MIN_NOTIONAL", "notional": "5"},
+            ]}]})
+        )
+        mock.get("https://fapi.binance.com/fapi/v1/ticker/bookTicker").mock(
+            return_value=httpx.Response(200, json={"bidPrice": "50000.0", "askPrice": "50001.0"})
+        )
+        mock.get("https://fapi.binance.com/fapi/v2/positionRisk").mock(
+            return_value=httpx.Response(200, json=[{"symbol": "BTCUSDT", "positionAmt": "0.5"}])
+        )
         mock.post("https://fapi.binance.com/fapi/v1/order").mock(
             return_value=httpx.Response(200, json=ORDER_STUB)
         )
@@ -323,7 +336,20 @@ async def test_place_limit_order(monkeypatch):
 async def test_place_market_order(monkeypatch):
     mock_env(monkeypatch)
     filled = {**ORDER_STUB, "type": "MARKET", "status": "FILLED", "executedQty": "0.01"}
-    with respx.mock() as mock:
+    with respx.mock(assert_all_called=False) as mock:
+        mock.get("https://fapi.binance.com/fapi/v1/exchangeInfo").mock(
+            return_value=httpx.Response(200, json={"symbols": [{"symbol": "BTCUSDT", "filters": [
+                {"filterType": "PRICE_FILTER", "tickSize": "0.10"},
+                {"filterType": "LOT_SIZE", "stepSize": "0.001", "minQty": "0.001"},
+                {"filterType": "MIN_NOTIONAL", "notional": "5"},
+            ]}]})
+        )
+        mock.get("https://fapi.binance.com/fapi/v1/ticker/bookTicker").mock(
+            return_value=httpx.Response(200, json={"bidPrice": "50000.0", "askPrice": "50001.0"})
+        )
+        mock.get("https://fapi.binance.com/fapi/v2/positionRisk").mock(
+            return_value=httpx.Response(200, json=[{"symbol": "BTCUSDT", "positionAmt": "0.5"}])
+        )
         mock.post("https://fapi.binance.com/fapi/v1/order").mock(
             return_value=httpx.Response(200, json=filled)
         )
@@ -360,7 +386,20 @@ async def test_place_stop_market_close(monkeypatch):
         "closePosition": True,
         "updateTime": 1700000000000,
     }
-    with respx.mock() as mock:
+    with respx.mock(assert_all_called=False) as mock:
+        mock.get("https://fapi.binance.com/fapi/v1/exchangeInfo").mock(
+            return_value=httpx.Response(200, json={"symbols": [{"symbol": "BTCUSDT", "filters": [
+                {"filterType": "PRICE_FILTER", "tickSize": "0.10"},
+                {"filterType": "LOT_SIZE", "stepSize": "0.001", "minQty": "0.001"},
+                {"filterType": "MIN_NOTIONAL", "notional": "5"},
+            ]}]})
+        )
+        mock.get("https://fapi.binance.com/fapi/v1/ticker/bookTicker").mock(
+            return_value=httpx.Response(200, json={"bidPrice": "50000.0", "askPrice": "50001.0"})
+        )
+        mock.get("https://fapi.binance.com/fapi/v2/positionRisk").mock(
+            return_value=httpx.Response(200, json=[{"symbol": "BTCUSDT", "positionAmt": "0.5"}])
+        )
         mock.post("https://fapi.binance.com/fapi/v1/algoOrder").mock(
             return_value=httpx.Response(200, json=algo_stop)
         )
@@ -669,3 +708,183 @@ async def test_place_order_callback_rate_wrong_type(monkeypatch):
                         "callback_rate": 1.0,
                     },
                 )
+
+
+# ── Pre-flight guards ─────────────────────────────────────────────────────────
+#
+# Regression cover for 2026-08-04: an agent placed a SHORT setup's entry ladder as BUY LIMITs
+# above the market. Buy limits above the market cross and fill as taker, so 1151 contracts
+# opened against the intended direction, were flattened, and re-opened four times — 27 taker
+# fills for 0.34 USDT of commission. Every call was valid per the Binance API; only the meaning
+# was wrong. These tests pin the checks that make such an order unsendable.
+
+EXCHANGE_INFO = {
+    "symbols": [
+        {
+            "symbol": "POLUSDT",
+            "filters": [
+                {"filterType": "PRICE_FILTER", "tickSize": "0.00001"},
+                {"filterType": "LOT_SIZE", "stepSize": "1", "minQty": "1"},
+                {"filterType": "MIN_NOTIONAL", "notional": "5"},
+            ],
+        }
+    ]
+}
+
+
+def _mock_common(mock, bid="0.07277", ask="0.07279", position_amt="0"):
+    mock.post("https://fapi.binance.com/fapi/v1/algoOrder").mock(
+        return_value=httpx.Response(200, json={"algoId": 2, "symbol": "POLUSDT"})
+    )
+    mock.get("https://fapi.binance.com/fapi/v1/exchangeInfo").mock(
+        return_value=httpx.Response(200, json=EXCHANGE_INFO)
+    )
+    mock.get("https://fapi.binance.com/fapi/v1/ticker/bookTicker").mock(
+        return_value=httpx.Response(200, json={"bidPrice": bid, "askPrice": ask})
+    )
+    mock.get("https://fapi.binance.com/fapi/v2/positionRisk").mock(
+        return_value=httpx.Response(
+            200, json=[{"symbol": "POLUSDT", "positionAmt": position_amt}]
+        )
+    )
+    mock.post("https://fapi.binance.com/fapi/v1/order").mock(
+        return_value=httpx.Response(200, json={"orderId": 1, "symbol": "POLUSDT"})
+    )
+
+
+@pytest.mark.asyncio
+async def test_rejects_buy_limit_above_market(monkeypatch):
+    """The exact POL order: BUY LIMIT 0.0733 with the book at 0.07277/0.07279."""
+    mock_env(monkeypatch)
+    with respx.mock(assert_all_called=False) as mock:
+        _mock_common(mock)
+        async with Client(server.mcp) as c:
+            with pytest.raises(Exception) as exc:
+                await c.call_tool(
+                    "place_order",
+                    {
+                        "symbol": "POLUSDT", "side": "BUY", "order_type": "LIMIT",
+                        "quantity": 575, "price": 0.0733, "time_in_force": "GTC",
+                    },
+                )
+    assert "crosses" in str(exc.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_rejects_sell_limit_below_market(monkeypatch):
+    """Mirror case — a SELL entry priced under the bid also crosses."""
+    mock_env(monkeypatch)
+    with respx.mock(assert_all_called=False) as mock:
+        _mock_common(mock)
+        async with Client(server.mcp) as c:
+            with pytest.raises(Exception) as exc:
+                await c.call_tool(
+                    "place_order",
+                    {
+                        "symbol": "POLUSDT", "side": "SELL", "order_type": "LIMIT",
+                        "quantity": 575, "price": 0.0720, "time_in_force": "GTC",
+                    },
+                )
+    assert "crosses" in str(exc.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_allows_correct_resting_entries(monkeypatch):
+    """The order the agent SHOULD have sent: SELL above the bid. Must pass untouched."""
+    mock_env(monkeypatch)
+    with respx.mock(assert_all_called=False) as mock:
+        _mock_common(mock)
+        async with Client(server.mcp) as c:
+            res = await c.call_tool(
+                "place_order",
+                {
+                    "symbol": "POLUSDT", "side": "SELL", "order_type": "LIMIT",
+                    "quantity": 575, "price": 0.0733, "time_in_force": "GTC",
+                },
+            )
+    assert res.structured_content["orderId"] == 1
+
+
+@pytest.mark.asyncio
+async def test_allow_crossing_escape_hatch(monkeypatch):
+    """A deliberate marketable limit stays possible when the caller says so."""
+    mock_env(monkeypatch)
+    with respx.mock(assert_all_called=False) as mock:
+        _mock_common(mock)
+        async with Client(server.mcp) as c:
+            res = await c.call_tool(
+                "place_order",
+                {
+                    "symbol": "POLUSDT", "side": "BUY", "order_type": "LIMIT",
+                    "quantity": 575, "price": 0.0733, "time_in_force": "GTC",
+                    "allow_crossing": True,
+                },
+            )
+    assert res.structured_content["orderId"] == 1
+
+
+@pytest.mark.asyncio
+async def test_market_orders_unaffected(monkeypatch):
+    """MARKET is an explicit request for an immediate fill — never blocked."""
+    mock_env(monkeypatch)
+    with respx.mock(assert_all_called=False) as mock:
+        _mock_common(mock)
+        async with Client(server.mcp) as c:
+            res = await c.call_tool(
+                "place_order",
+                {"symbol": "POLUSDT", "side": "BUY", "order_type": "MARKET", "quantity": 575},
+            )
+    assert res.structured_content["orderId"] == 1
+
+
+@pytest.mark.asyncio
+async def test_rejects_reduce_only_without_position(monkeypatch):
+    """A protective order with nothing to protect is a no-op the exchange rejects opaquely."""
+    mock_env(monkeypatch)
+    with respx.mock(assert_all_called=False) as mock:
+        _mock_common(mock, position_amt="0")
+        async with Client(server.mcp) as c:
+            with pytest.raises(Exception) as exc:
+                await c.call_tool(
+                    "place_order",
+                    {
+                        "symbol": "POLUSDT", "side": "SELL", "order_type": "MARKET",
+                        "quantity": 100, "reduce_only": True,
+                    },
+                )
+    assert "no open position" in str(exc.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_rejects_reduce_only_on_wrong_side(monkeypatch):
+    """Reducing a LONG requires SELL — a BUY here would ADD exposure while claiming to protect."""
+    mock_env(monkeypatch)
+    with respx.mock(assert_all_called=False) as mock:
+        _mock_common(mock, position_amt="500")
+        async with Client(server.mcp) as c:
+            with pytest.raises(Exception) as exc:
+                await c.call_tool(
+                    "place_order",
+                    {
+                        "symbol": "POLUSDT", "side": "BUY", "order_type": "MARKET",
+                        "quantity": 100, "reduce_only": True,
+                    },
+                )
+    assert "add exposure" in str(exc.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_allows_reduce_only_on_correct_side(monkeypatch):
+    """The legitimate protective case must never be blocked."""
+    mock_env(monkeypatch)
+    with respx.mock(assert_all_called=False) as mock:
+        _mock_common(mock, position_amt="-500")
+        async with Client(server.mcp) as c:
+            res = await c.call_tool(
+                "place_order",
+                {
+                    "symbol": "POLUSDT", "side": "BUY", "order_type": "STOP_MARKET",
+                    "quantity": 100, "stop_price": 0.0740, "reduce_only": True,
+                },
+            )
+    assert res.structured_content is not None

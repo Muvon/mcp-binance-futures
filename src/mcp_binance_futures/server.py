@@ -526,6 +526,17 @@ async def place_order(
     client_order_id: Annotated[
         str | None, Field(description="Optional custom order ID (max 36 chars).")
     ] = None,
+    allow_crossing: Annotated[
+        bool,
+        Field(
+            description=(
+                "Escape hatch for a DELIBERATE marketable limit. Normally a non-reduce-only LIMIT "
+                "priced through the market is refused, because it fills instantly as TAKER rather "
+                "than resting — that is a MARKET order wearing a limit's clothes, and it is almost "
+                "always a mistake in the order's side. Set True only when crossing is the intent."
+            )
+        ),
+    ] = False,
     callback_rate: Annotated[
         float | None,
         Field(
@@ -592,6 +603,59 @@ async def place_order(
                 int(filt["qtyPrec"]),
                 ref_price,
                 filt["minNotional"],
+            )
+
+    # ------------------------------------------------------------------ #
+    # PRE-FLIGHT GUARDS
+    #
+    # This server is a faithful mirror of the Binance API, which means every mistake the API
+    # permits is expressible by a caller — and an LLM caller will eventually express one. These
+    # checks reject the orders that are wrong on their own terms, using only the order and live
+    # exchange state. No strategy knowledge, no persisted files, no caller-specific coupling.
+    #
+    # Motivating incident (2026-08-04): an agent holding a SHORT setup placed its entry ladder as
+    # BUY LIMITs ABOVE the market. A buy limit above the market does not rest — it crosses and
+    # fills as taker. 1151 contracts opened against the intended direction, were flattened, and
+    # re-opened four times: 27 taker fills and 0.34 USDT of commission on a 0.02 USDT gross move.
+    # Every individual call was valid per the Binance API. Only their meaning was wrong.
+    # ------------------------------------------------------------------ #
+    is_entry = not reduce_only and not close_position
+
+    # (a) A non-reduce-only LIMIT that is priced through the market is not a limit order.
+    #     Refusing it turns a silent, expensive fill into a loud, free error.
+    if order_type == "LIMIT" and is_entry and not allow_crossing and price is not None:
+        book = await _client(ctx).get("/fapi/v1/ticker/bookTicker", {"symbol": symbol})
+        bid, ask = float(book["bidPrice"]), float(book["askPrice"])
+        crosses = (side == "BUY" and price >= ask) or (side == "SELL" and price <= bid)
+        if crosses:
+            raise ValueError(
+                f"Refusing {side} LIMIT {quantity} {symbol} @ {price}: the book is "
+                f"{bid}/{ask}, so this order crosses and fills as TAKER instead of resting. "
+                f"A resting {side} entry must be priced "
+                f"{'BELOW the ask' if side == 'BUY' else 'ABOVE the bid'}. "
+                f"If the side is wrong, invert it; if you truly want an immediate fill, send "
+                f"order_type='MARKET'; if you deliberately want a marketable limit, pass "
+                f"allow_crossing=True."
+            )
+
+    # (b) A reduce-only / close_position order must actually oppose a live position. Without a
+    #     position it is a no-op the exchange rejects opaquely (-2022); on the same side as the
+    #     position it would ADD exposure, which is the precise opposite of protecting it.
+    if not is_entry:
+        pos = await _client(ctx).get_signed("/fapi/v2/positionRisk", {"symbol": symbol})
+        amt = next((float(p["positionAmt"]) for p in pos if p["symbol"] == symbol), 0.0)
+        if amt == 0.0:
+            raise ValueError(
+                f"Refusing {side} {order_type} on {symbol} with reduce_only/close_position set: "
+                f"there is no open position to reduce. Protective orders require a position; "
+                f"place the entry first, or drop reduce_only if you meant to open one."
+            )
+        needed = "SELL" if amt > 0 else "BUY"
+        if side != needed:
+            raise ValueError(
+                f"Refusing {side} {order_type} on {symbol}: the position is "
+                f"{'LONG' if amt > 0 else 'SHORT'} {abs(amt)}, so a reducing order must be "
+                f"{needed}. A {side} order here would ADD exposure, not protect it."
             )
 
     if order_type in _ALGO_ORDER_TYPES:
